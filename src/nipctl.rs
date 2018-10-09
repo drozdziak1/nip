@@ -1,4 +1,3 @@
-#[macro_use]
 extern crate env_logger;
 #[macro_use]
 extern crate failure;
@@ -18,26 +17,18 @@ extern crate tokio_core;
 mod constants;
 mod nip_index;
 mod nip_ref;
+mod nip_remote;
 mod util;
 
-use byteorder::{BigEndian, WriteBytesExt};
-use git2::Repository;
 use ipfs_api::IpfsClient;
 use log::LevelFilter;
 use tokio_core::reactor::Core;
 
-use std::{
-    collections::BTreeSet,
-    fs::File,
-    io::{BufReader, Cursor, Write},
-    sync::{Arc, Mutex},
-    thread,
-};
+use std::{collections::BTreeSet, io::Cursor};
 
-use constants::{NIP_MAGIC, NIP_PROTOCOL_VERSION};
 use nip_index::NIPIndex;
 use nip_ref::NIPRef;
-use util::gen_nip_header;
+use util::{gen_nip_header, ipns_deref};
 
 /// A simple binary for managing nip remotes
 pub fn main() {
@@ -73,4 +64,10 @@ pub fn main() {
     let mut event_loop = Core::new().unwrap();
     let response = event_loop.run(req).unwrap();
     info!("Response: {:?}", response);
+
+    let publish_req = ipfs.name_publish(response.hash.as_str(), true, None, None, None);
+    let published = event_loop.run(publish_req).unwrap();
+
+    info!("Published: /ipns/{}, value: {}", published.name, published.value);
+
 }

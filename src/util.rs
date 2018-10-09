@@ -1,9 +1,11 @@
-use super::env_logger;
+use super::{env_logger, ipfs_api};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use env_logger::Builder;
 use failure::Error;
+use ipfs_api::IpfsClient;
 use log::LevelFilter;
+use tokio_core::reactor::Core;
 
 use std::env;
 
@@ -47,4 +49,11 @@ pub fn gen_nip_header(version: Option<u16>) -> Result<Vec<u8>, Error> {
     ret.extend_from_slice(NIP_MAGIC);
     ret.write_u16::<BigEndian>(version.unwrap_or(NIP_PROTOCOL_VERSION))?;
     Ok(ret)
+}
+
+/// Returns the underlying IPFS path from an IPNS record
+pub fn ipns_deref(ipns_hash: &str, ipfs: &mut IpfsClient) -> Result<String, Error> {
+    let mut event_loop = Core::new()?;
+    let req = ipfs.name_resolve(Some(&ipns_hash), true, false);
+    Ok(event_loop.run(req)?.path)
 }

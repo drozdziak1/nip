@@ -1,15 +1,8 @@
 use failure::Error;
-use futures::{Future, Stream};
-use ipfs_api::IpfsClient;
-use serde_cbor;
-use tokio_core::reactor::Core;
 
-use std::{cmp::Ordering, collections::BTreeSet, str::FromStr, string::ToString};
+use std::{str::FromStr, string::ToString};
 
-use constants::{IPFS_HASH_LEN, NIP_HEADER_LEN, NIP_PROTOCOL_VERSION};
-use nip_ref::NIPRef;
-use nip_index::NIPIndex;
-use util::parse_nip_header;
+use constants::IPFS_HASH_LEN;
 
 #[derive(Clone, Debug, PartialEq)]
 /// A representation of a NIP remote repository
@@ -28,53 +21,6 @@ pub enum NIPRemoteParseError {
     InvalidLinkFormat,
     #[fail(display = "Failed to parse remote type: {}", _0)]
     Other(String),
-}
-
-impl NIPRemote {
-    pub fn list_refs(&self, ipfs: &mut IpfsClient) -> Result<BTreeSet<NIPRef>, Error> {
-        match self {
-            NIPRemote::ExistingIPFS(ref hash) => {
-                info!("Fetching /ipfs/{}", hash);
-                let mut event_loop = Core::new()?;
-                let req = ipfs.cat(hash).concat2();
-
-                let bytes = event_loop.run(req)?;
-
-                match String::from_utf8(bytes.to_vec()) {
-                    Ok(s) => trace!("Received string:\n{}", s),
-                    Err(_e) => trace!("Received raw bytes:\n{:?}", bytes),
-                }
-
-                let protocol_version = parse_nip_header(&bytes[..NIP_HEADER_LEN])?;
-                debug!("Index protocol version {}", protocol_version);
-                match protocol_version.cmp(&NIP_PROTOCOL_VERSION) {
-                    Ordering::Less => debug!(
-                        "NIP index is {} protocol versions behind, migrating...",
-                        NIP_PROTOCOL_VERSION - protocol_version
-                    ),
-                    Ordering::Equal => {}
-                    Ordering::Greater => {
-                        error!(
-                            "NIP index is {} protocol versions ahead, please upgrade NIP to use it",
-                            protocol_version - NIP_PROTOCOL_VERSION
-                        );
-                        bail!("Our NIP is too old");
-                    }
-                }
-                let idx: NIPIndex = serde_cbor::from_slice(&bytes[NIP_HEADER_LEN..])?;
-                Ok(idx.refs)
-            }
-            NIPRemote::ExistingIPNS(ref hash) => {
-                info!("Hash /ipns/{} comes from IPNS, dereferencing...", hash);
-                Ok(BTreeSet::new())
-            }
-            NIPRemote::NewIPFS | NIPRemote::NewIPNS => {
-                warn!("fetch_refs(): Unexpected {} remote", self.to_string());
-               Ok(BTreeSet::new())
-            }
-        }
-
-    }
 }
 
 impl FromStr for NIPRemote {
