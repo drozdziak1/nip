@@ -90,7 +90,7 @@ mod tests {
                 e.downcast::<NIPRemoteParseError>().unwrap(),
                 NIPRemoteParseError::InvalidLinkFormat
             ),
-            Ok(_) => panic!("Got an Ok, InvalidLinkFormat"),
+            Ok(_) => panic!("Got an Ok, InvalidLinkFormat expected"),
         }
     }
 
@@ -102,7 +102,7 @@ mod tests {
                 e.downcast::<NIPRemoteParseError>().unwrap(),
                 NIPRemoteParseError::InvalidHashLength(bs_hash.len(), IPFS_HASH_LEN)
             ),
-            Ok(_) => panic!("Got an Ok, InvalidLinkFormat"),
+            Ok(_) => panic!("Got an Ok, InvalidHashLength expected"),
         }
     }
 }

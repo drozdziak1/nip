@@ -1,4 +1,4 @@
-use super::{env_logger, ipfs_api};
+use super::{env_logger};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use env_logger::Builder;
@@ -19,7 +19,7 @@ pub fn init_logging(default_lvl: LevelFilter) {
     }
 }
 
-/// Parse a NIP header and returnt the protocol version.
+/// Parse a NIP header and return the protocol version.
 ///
 /// PS.: Comedy Gold Best Pun Award 2018 goes to: parsnip header
 pub fn parse_nip_header(header: &[u8]) -> Result<u16, Error> {

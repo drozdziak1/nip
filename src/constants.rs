@@ -1,4 +1,3 @@
-pub static GIT_HASH_LEN: usize = 40;
 pub static IPFS_HASH_LEN: usize = 46;
 
 // Protocol header components, loosely placed just before serialized NIPIndices to allow for

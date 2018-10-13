@@ -16,7 +16,6 @@ extern crate tokio_core;
 
 mod constants;
 mod nip_index;
-mod nip_ref;
 mod nip_remote;
 mod util;
 
@@ -24,10 +23,9 @@ use ipfs_api::IpfsClient;
 use log::LevelFilter;
 use tokio_core::reactor::Core;
 
-use std::{collections::BTreeSet, io::Cursor};
+use std::{collections::BTreeMap, io::Cursor};
 
 use nip_index::NIPIndex;
-use nip_ref::NIPRef;
 use util::{gen_nip_header, ipns_deref};
 
 /// A simple binary for managing nip remotes
@@ -39,18 +37,16 @@ pub fn main() {
     let mut buf = gen_nip_header(None).unwrap();
 
     info!("Header: {:?}", buf.clone());
-
-    let nip_ref = NIPRef::new(
+    let mut refs = BTreeMap::new();
+    refs.insert(
         "refs/heads/master".to_owned(),
         "529885ae94597ffdc9c8adae9b643f103c590b88".to_owned(),
-        "QmejvEPop4D7YUadeGqYWmZxHhLc4JBUCzJJHWMzdcMe2y".to_owned(),
-    ).unwrap();
-
-    let mut refs = BTreeSet::new();
-    refs.insert(nip_ref);
+    );
+    let mut objects = BTreeMap::new();
 
     let idx = NIPIndex {
         refs,
+        objects,
         prev_idx_hash: None,
     };
 
@@ -68,6 +64,8 @@ pub fn main() {
     let publish_req = ipfs.name_publish(response.hash.as_str(), true, None, None, None);
     let published = event_loop.run(publish_req).unwrap();
 
-    info!("Published: /ipns/{}, value: {}", published.name, published.value);
-
+    info!(
+        "Published: /ipns/{}, value: {}",
+        published.name, published.value
+    );
 }

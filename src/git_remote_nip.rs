@@ -9,6 +9,7 @@ extern crate byteorder;
 extern crate docopt;
 extern crate env_logger;
 extern crate futures;
+extern crate git2;
 extern crate hyper;
 extern crate ipfs_api;
 extern crate libc;
@@ -18,14 +19,16 @@ extern crate tokio_core;
 
 mod constants;
 mod nip_index;
-mod nip_ref;
+mod nip_object;
 mod nip_remote;
 mod util;
 
 use docopt::Docopt;
 use failure::Error;
+use git2::Repository;
 use ipfs_api::IpfsClient;
 use log::LevelFilter;
+use tokio_core::reactor::Core;
 
 use std::{
     env, io,
@@ -44,6 +47,7 @@ Usage: git-remote-nip <remote> <mode-or-hash>
        git-remote-nip --version
 ";
 
+/// NIP's remote helper API capabilities
 static NIP_CAPS: &[&'static str] = &["fetch", "push"];
 
 #[derive(Debug, Deserialize)]
@@ -68,7 +72,7 @@ fn main() {
     let remote_type: NIPRemote = args.arg_mode_or_hash.parse().unwrap();
 
     let mut ipfs = IpfsClient::default();
-    let idx = NIPIndex::from_nip_remote(&remote_type, &mut ipfs).unwrap();
+    let mut idx = NIPIndex::from_nip_remote(&remote_type, &mut ipfs).unwrap();
     trace!("Obtained index {:#?}", idx);
 
     let mut input_handle = BufReader::new(io::stdin());
@@ -76,11 +80,17 @@ fn main() {
 
     handle_capabilities(&mut input_handle, &mut output_handle).unwrap();
     handle_list(&mut input_handle, &mut output_handle, &remote_type, &idx).unwrap();
+
+    let mut repo = Repository::open_from_env().unwrap();
+
     handle_fetches_and_pushes(
         &mut input_handle,
         &mut output_handle,
+        &mut repo,
         &remote_type,
+        &args.arg_remote,
         &mut ipfs,
+        &mut idx,
     ).unwrap();
 }
 
@@ -144,10 +154,8 @@ fn handle_list(
                 "Listing refs from existing repo at {}",
                 existing.to_string()
             );
-            debug!("Fetched refs:");
-
-            for nip_ref in &idx.refs {
-                let mut output = format!("{} {}", nip_ref.git_hash, nip_ref.name);
+            for (name, git_hash) in &idx.refs {
+                let mut output = format!("{} {}", git_hash, name);
                 debug!("{}", output);
                 writeln!(output_handle, "{}", output)?;
             }
@@ -162,21 +170,102 @@ fn handle_list(
 fn handle_fetches_and_pushes(
     input_handle: &mut BufRead,
     output_handle: &mut Write,
+    repo: &mut Repository,
     remote_type: &NIPRemote,
+    remote_name: &str,
     ipfs: &mut IpfsClient,
+    idx: &mut NIPIndex,
 ) -> Result<(), Error> {
     for line in input_handle.lines() {
         let line_buf = line?;
         match line_buf.as_str() {
+            // fetch <sha> <ref_name>
             fetch_line if fetch_line.starts_with("fetch") => {
-                debug!("Raw fetch line {:?}", fetch_line);
+                trace!("Raw fetch line {:?}", fetch_line);
+
+                // Skip the "fetch" part
+                let mut iter = fetch_line.split_whitespace().skip(1);
+
+                let ref_git_hash = iter.next().ok_or_else(|| {
+                    format_err!(
+                        "Could not read in ref git hash from fetch line: {:?}",
+                        fetch_line
+                    )
+                })?;
+                debug!("Parsed git hash: {}", ref_git_hash);
+
+                let ref_name = iter.next().ok_or_else(|| {
+                    format_err!(
+                        "Could not read in ref name from fetch line: {:?}",
+                        fetch_line
+                    )
+                })?;
+                debug!("Parsed ref name: {}", ref_name);
+
+                // TODO haul all objects into the Odb
             }
+            // push <refspec>
             push_line if push_line.starts_with("push") => {
-                debug!("Raw push line {:?}", push_line);
+                trace!("Raw push line {:?}", push_line);
+
+                // Skip the "push" part
+                let refspec = push_line.split_whitespace().nth(1).ok_or_else(|| {
+                    format_err!("Could not read in refspec from push line: {:?}", push_line)
+                })?;
+
+                // Separate source, destination and the force flag
+                let mut refspec_iter = refspec.split(':');
+
+                let first_half = refspec_iter.next().ok_or_else(|| {
+                    format_err!("Could not read source ref from refspec: {:?}", refspec)
+                })?;
+
+                let force = first_half.starts_with('+');
+
+                let src = if force {
+                    warn!("THIS PUSH WILL BE FORCED");
+                    &first_half[1..]
+                } else {
+                    first_half
+                };
+                debug!("Parsed src: {}", src);
+
+                let dst = refspec_iter.next().ok_or_else(|| {
+                    format_err!("Could not read destination ref from refspec: {:?}", refspec)
+                })?;
+                debug!("Parsed dst: {}", dst);
+
+                // Upload the object tree
+                idx.push_ref_from_str(src, dst, repo, ipfs)?;
+                debug!("Index after upload: {:#?}", idx);
+
+                let new_hash = idx.ipfs_add(ipfs)?;
+
+                let new_remote_type = match remote_type {
+                    NIPRemote::NewIPFS | NIPRemote::ExistingIPFS(..) => {
+                        NIPRemote::ExistingIPFS(new_hash)
+                    }
+                    NIPRemote::NewIPNS | NIPRemote::ExistingIPNS(..) => {
+                        let mut event_loop = Core::new()?;
+
+                        let publish_req = ipfs.name_publish(&new_hash, true, None, None, None);
+
+                        let ipns_hash = format!("/ipns/{}", event_loop.run(publish_req)?.name);
+                        NIPRemote::ExistingIPNS(ipns_hash)
+                    }
+                };
+
+                info!(
+                    "Remote {} {:?} -> {:?}",
+                    remote_name, remote_type, new_remote_type
+                );
+
+                // We pretend we succeed all the time for now
+                writeln!(output_handle, "ok {}", dst)?;
             }
             // The lines() iterator clips the newline by default, so the last line match is ""
             "" => {
-                debug!("Consumed all \"fetch\" and \"push\" commands");
+                trace!("Consumed all fetch/push commands");
                 break;
             }
             other => {
