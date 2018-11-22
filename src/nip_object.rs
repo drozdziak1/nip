@@ -1,6 +1,6 @@
 use failure::Error;
 use futures::Stream;
-use git2::{Blob, Commit, Odb, OdbObject, Tag, Tree};
+use git2::{Blob, Commit, ObjectType, Odb, OdbObject, Oid, Tag, Tree};
 use ipfs_api::IpfsClient;
 use tokio_core::reactor::Core;
 
@@ -9,13 +9,13 @@ use std::{collections::BTreeSet, io::Cursor};
 use constants::{NIP_HEADER_LEN, NIP_PROTOCOL_VERSION};
 use util::{gen_nip_header, parse_nip_header};
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NIPObject {
     pub raw_data_ipfs_hash: String,
     pub metadata: NIPObjectMetadata,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum NIPObjectMetadata {
     Commit {
         parent_git_hashes: BTreeSet<String>,
@@ -31,7 +31,7 @@ pub enum NIPObjectMetadata {
 }
 
 impl NIPObject {
-    pub fn from_blob(blob: &Blob, odb: &Odb, ipfs: &mut IpfsClient) -> Result<Self, Error> {
+    pub fn from_git_blob(blob: &Blob, odb: &Odb, ipfs: &mut IpfsClient) -> Result<Self, Error> {
         let odb_obj = odb.read(blob.id())?;
         let raw_data_ipfs_hash = Self::upload_odb_obj(odb_obj, ipfs)?;
 
@@ -41,7 +41,11 @@ impl NIPObject {
         })
     }
 
-    pub fn from_commit(commit: &Commit, odb: &Odb, ipfs: &mut IpfsClient) -> Result<Self, Error> {
+    pub fn from_git_commit(
+        commit: &Commit,
+        odb: &Odb,
+        ipfs: &mut IpfsClient,
+    ) -> Result<Self, Error> {
         let odb_obj = odb.read(commit.id())?;
         let raw_data_ipfs_hash = Self::upload_odb_obj(odb_obj, ipfs)?;
         let parent_git_hashes: BTreeSet<String> = commit
@@ -60,19 +64,19 @@ impl NIPObject {
         })
     }
 
-    pub fn from_tag(tag: &Tag, odb: &Odb, ipfs: &mut IpfsClient) -> Result<Self, Error> {
+    pub fn from_git_tag(tag: &Tag, odb: &Odb, ipfs: &mut IpfsClient) -> Result<Self, Error> {
         let odb_obj = odb.read(tag.id())?;
         let raw_data_ipfs_hash = Self::upload_odb_obj(odb_obj, ipfs)?;
 
         Ok(Self {
             raw_data_ipfs_hash,
             metadata: NIPObjectMetadata::Tag {
-                target_git_hash: format!("{}", tag.target_id())
+                target_git_hash: format!("{}", tag.target_id()),
             },
         })
     }
 
-    pub fn from_tree(tree: &Tree, odb: &Odb, ipfs: &mut IpfsClient) -> Result<Self, Error> {
+    pub fn from_git_tree(tree: &Tree, odb: &Odb, ipfs: &mut IpfsClient) -> Result<Self, Error> {
         let odb_obj = odb.read(tree.id())?;
         let raw_data_ipfs_hash = Self::upload_odb_obj(odb_obj, ipfs)?;
 
@@ -99,20 +103,10 @@ impl NIPObject {
                 "Unsupported protocol version {} (We're at {})",
                 obj_nip_proto_version,
                 NIP_PROTOCOL_VERSION
-                );
+            );
         }
 
         Ok(serde_cbor::from_slice(&object_bytes[NIP_HEADER_LEN..])?)
-    }
-
-    fn upload_odb_obj(odb_obj: OdbObject, ipfs: &mut IpfsClient) -> Result<String, Error> {
-        let mut event_loop = Core::new()?;
-
-        let obj_buf = odb_obj.data().to_vec();
-
-        let raw_data_req = ipfs.add(Cursor::new(obj_buf));
-
-        Ok(format!("/ipfs/{}", event_loop.run(raw_data_req)?.hash))
     }
 
     pub fn ipfs_add(&self, ipfs: &mut IpfsClient) -> Result<String, Error> {
@@ -125,5 +119,31 @@ impl NIPObject {
         let ipfs_hash = format!("/ipfs/{}", event_loop.run(req)?.hash);
 
         Ok(ipfs_hash)
+    }
+
+    fn upload_odb_obj(odb_obj: OdbObject, ipfs: &mut IpfsClient) -> Result<String, Error> {
+        let mut event_loop = Core::new()?;
+
+        let obj_buf = odb_obj.data().to_vec();
+
+        let raw_data_req = ipfs.add(Cursor::new(obj_buf));
+
+        Ok(format!("/ipfs/{}", event_loop.run(raw_data_req)?.hash))
+    }
+
+    pub fn write_raw_data(&self, odb: &mut Odb, ipfs: &mut IpfsClient) -> Result<Oid, Error> {
+        let mut event_loop = Core::new()?;
+        let req = ipfs.cat(&self.raw_data_ipfs_hash).concat2();
+
+        let bytes = event_loop.run(req)?;
+
+        let obj_type = match self.metadata {
+            NIPObjectMetadata::Blob => ObjectType::Blob,
+            NIPObjectMetadata::Commit { .. } => ObjectType::Commit,
+            NIPObjectMetadata::Tag { .. } => ObjectType::Tag,
+            NIPObjectMetadata::Tree { .. } => ObjectType::Tree,
+        };
+
+        Ok(odb.write(obj_type, &bytes)?)
     }
 }

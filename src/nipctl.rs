@@ -16,6 +16,7 @@ extern crate tokio_core;
 
 mod constants;
 mod nip_index;
+mod nip_object;
 mod nip_remote;
 mod util;
 

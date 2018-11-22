@@ -73,7 +73,7 @@ fn main() {
 
     let mut ipfs = IpfsClient::default();
     let mut idx = NIPIndex::from_nip_remote(&remote_type, &mut ipfs).unwrap();
-    trace!("Obtained index {:#?}", idx);
+    trace!("Using index {:#?}", idx);
 
     let mut input_handle = BufReader::new(io::stdin());
     let mut output_handle = io::stdout();
@@ -186,23 +186,23 @@ fn handle_fetches_and_pushes(
                 // Skip the "fetch" part
                 let mut iter = fetch_line.split_whitespace().skip(1);
 
-                let ref_git_hash = iter.next().ok_or_else(|| {
+                let hash_to_fetch = iter.next().ok_or_else(|| {
                     format_err!(
                         "Could not read in ref git hash from fetch line: {:?}",
                         fetch_line
                     )
                 })?;
-                debug!("Parsed git hash: {}", ref_git_hash);
+                debug!("Parsed git hash: {}", hash_to_fetch);
 
-                let ref_name = iter.next().ok_or_else(|| {
+                let target_ref_name = iter.next().ok_or_else(|| {
                     format_err!(
                         "Could not read in ref name from fetch line: {:?}",
                         fetch_line
                     )
                 })?;
-                debug!("Parsed ref name: {}", ref_name);
+                debug!("Parsed ref name: {}", target_ref_name);
 
-                // TODO haul all objects into the Odb
+                idx.fetch_to_ref_from_str(hash_to_fetch, target_ref_name, repo, ipfs)?;
             }
             // push <refspec>
             push_line if push_line.starts_with("push") => {
@@ -241,26 +241,31 @@ fn handle_fetches_and_pushes(
 
                 let new_hash = idx.ipfs_add(ipfs)?;
 
-                let new_remote_type = match remote_type {
-                    NIPRemote::NewIPFS | NIPRemote::ExistingIPFS(..) => {
-                        NIPRemote::ExistingIPFS(new_hash)
-                    }
+                let new_remote_type: NIPRemote = match remote_type {
+                    NIPRemote::NewIPFS | NIPRemote::ExistingIPFS(..) => new_hash.parse()?,
                     NIPRemote::NewIPNS | NIPRemote::ExistingIPNS(..) => {
                         let mut event_loop = Core::new()?;
 
                         let publish_req = ipfs.name_publish(&new_hash, true, None, None, None);
 
                         let ipns_hash = format!("/ipns/{}", event_loop.run(publish_req)?.name);
-                        NIPRemote::ExistingIPNS(ipns_hash)
+                        ipns_hash.parse()?
                     }
                 };
 
                 info!(
-                    "Remote {} {:?} -> {:?}",
-                    remote_name, remote_type, new_remote_type
+                    "NIP Remote {} moves onto a new hash:\nPrevious: {}\nNew: {}",
+                    remote_name,
+                    remote_type.to_string(),
+                    new_remote_type.to_string()
                 );
 
-                // We pretend we succeed all the time for now
+                match new_remote_type {
+                    NIPRemote::NewIPFS | NIPRemote::NewIPNS => panic!("INTERNAL ERROR: we have just uploaded the index, there's no way for it to be new at this point"),
+                    existing => repo.remote_set_url(remote_name, &format!("nipdev::{}", existing.to_string()))?
+                }
+
+                // Tell git we're done with this ref
                 writeln!(output_handle, "ok {}", dst)?;
             }
             // The lines() iterator clips the newline by default, so the last line match is ""
