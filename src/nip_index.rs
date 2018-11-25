@@ -259,7 +259,7 @@ impl NIPIndex {
         debug!("Fetch OK.");
         match repo.reference(target_ref_name, new_tip_oid, false, "NIP fetch") {
             Ok(_) => debug!("Set {} to {}", target_ref_name, new_tip_oid),
-            Err(e) => debug!("Could not set {} to {}: {:?}", target_ref_name, new_tip_oid, e.into_inner()),
+            Err(e) => debug!("Could not set {} to {}: {:?}", target_ref_name, new_tip_oid, e),
         }
 
         Ok(())
