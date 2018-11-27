@@ -259,7 +259,10 @@ impl NIPIndex {
         debug!("Fetch OK.");
         match repo.reference(target_ref_name, new_tip_oid, false, "NIP fetch") {
             Ok(_) => debug!("Set {} to {}", target_ref_name, new_tip_oid),
-            Err(e) => debug!("Could not set {} to {}: {:?}", target_ref_name, new_tip_oid, e),
+            Err(e) => debug!(
+                "Could not set {} to {}: {:?}",
+                target_ref_name, new_tip_oid, e
+            ),
         }
 
         Ok(())
@@ -408,11 +411,6 @@ impl NIPIndex {
             }
             NIPObjectMetadata::Blob => {
                 trace!("Handling NIP blob {}", nip_obj_ipfs_hash);
-            }
-            other => {
-                let msg = format!("Cannot process NIPObjects with metadata {:?}", other);
-                error!("{}", msg);
-                bail!("{}", msg);
             }
         }
 
