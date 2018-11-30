@@ -253,17 +253,29 @@ fn handle_fetches_and_pushes(
                     }
                 };
 
+                let new_url = match &new_remote_type {
+                    NIPRemote::NewIPFS | NIPRemote::NewIPNS => {
+                        panic!("INTERNAL ERROR: we have just uploaded the index, there's no way for it to be new at this point");
+                    }
+                    _existing => {
+                        trace!("Forming new URL for remote {}", remote_name);
+                        if remote_name.ends_with("nipdev") {
+                            format!("nipdev::{}", new_remote_type.to_string())
+                        } else {
+                            format!("nip::{}", new_remote_type.to_string())
+                        }
+                    }
+                };
+
                 info!(
-                    "NIP Remote {} moves onto a new hash:\nPrevious: {}\nNew: {}",
+                    "NIP Remote {} moves onto a new hash:\nPrevious: {}\nNew: {}\nFull new repo address: {}",
                     remote_name,
                     remote_type.to_string(),
-                    new_remote_type.to_string()
-                );
+                    new_remote_type.to_string(),
+                    new_url
+                    );
 
-                match new_remote_type {
-                    NIPRemote::NewIPFS | NIPRemote::NewIPNS => panic!("INTERNAL ERROR: we have just uploaded the index, there's no way for it to be new at this point"),
-                    existing => repo.remote_set_url(remote_name, &format!("nipdev::{}", existing.to_string()))?
-                }
+                repo.remote_set_url(remote_name, &new_url)?;
 
                 // Tell git we're done with this ref
                 writeln!(output_handle, "ok {}", dst)?;
