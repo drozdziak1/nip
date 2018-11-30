@@ -256,15 +256,22 @@ impl NIPIndex {
             bail!("{}", msg);
         }
 
-        debug!("Fetch OK.");
-        match repo.reference(target_ref_name, new_tip_oid, false, "NIP fetch") {
-            Ok(_) => debug!("Set {} to {}", target_ref_name, new_tip_oid),
-            Err(e) => debug!(
-                "Could not set {} to {}: {:?}",
-                target_ref_name, new_tip_oid, e
-            ),
+        match repo.odb()?.read_header(new_tip_oid)?.1 {
+            ObjectType::Commit => {
+                repo.reference(target_ref_name, new_tip_oid, false, "NIP fetch")?;
+            }
+            // Somehow git is upset when we set tag refs for it
+            ObjectType::Tag => {
+                debug!("Not setting ref for tag {}", new_tip_oid);
+            }
+            other_type => {
+                let msg = format!("New tip turned out to be a {} after fetch", other_type);
+                error!("{}", msg);
+                bail!("{}", msg);
+            }
         }
 
+        debug!("Fetched {} for {} OK.", hash_to_fetch, target_ref_name);
         Ok(())
     }
 
