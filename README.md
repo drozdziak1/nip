@@ -12,6 +12,20 @@ $ cargo install nip # Doesn't work yet!
 **Important:** Before you try to use nip please make sure that your local IPFS
 instance is running on its standard port.
 
+## Pushing an existing repo to a nip remote for the first time
+```shell
+$ git remote add nip nip::new-ipfs # Add a magic remote URL for a new IPFS repo
+$ git push --all nip # Push all refs to a brand new repo
+ INFO 2018-12-01T15:13:00Z: git_remote_nip: nip Remote nip moves onto a new
+hash:
+Previous: new-ipfs
+New: /ipfs/QmYn3tWpBKaTMgHY8F1cqDXwkHd5TGMqFpvX9ALqhD7Hew
+Full new repo address:
+nip::/ipfs/QmYn3tWpBKaTMgHY8F1cqDXwkHd5TGMqFpvX9ALqhD7Hew
+To nip::/ipfs/QmZq47khma5nP7DjHUPoERhKnfNUPqkr5pVwmS8A6TQSeN
+1112e8f..aa89007  master -> master
+```
+
 ## Cloning a repo from nip
 ```shell
 $ git clone nip::/ipfs/QmZq47khma5nP7DjHUPoERhKnfNUPqkr5pVwmS8A6TQSeN some_repo
@@ -30,20 +44,6 @@ Author: Stan Drozd <not-showing-my-email@because-spambots.com>
 Date:   Tue Nov 27 20:55:40 2018 +0100
 
    Committing some_file.txt
-```
-
-## Pushing an existing repo to a nip remote for the first time
-```shell
-$ git remote add nip nip::new-ipfs # Add a magic remote URL for a new IPFS repo
-$ git push --all nip # Push all refs to a brand new repo
- INFO 2018-12-01T15:13:00Z: git_remote_nip: nip Remote nip moves onto a new
-hash:
-Previous: new-ipfs
-New: /ipfs/QmYn3tWpBKaTMgHY8F1cqDXwkHd5TGMqFpvX9ALqhD7Hew
-Full new repo address:
-nip::/ipfs/QmYn3tWpBKaTMgHY8F1cqDXwkHd5TGMqFpvX9ALqhD7Hew
-To nip::/ipfs/QmZq47khma5nP7DjHUPoERhKnfNUPqkr5pVwmS8A6TQSeN
-1112e8f..aa89007  master -> master
 ```
 
 ## Repo administration with nipctl (WIP)
