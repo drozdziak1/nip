@@ -120,8 +120,7 @@ address.
 
 # Limitations
 * Repo pinning and git push notifications - people interested in keeping track
-of remote repo's progress have no way of knowing about pushes made to
-different nip repos. See [this
+of remote repo's progress have no way of knowing about pushes made to it. See [this
 issue](https://github.com/drozdziak1/nip/issues/7) for progress on the solution.
 * Submodules - nip doesn't understand how to push/pull submodule pins yet.
 * Disk space - by design local git objects need to have IPFS counterparts which
@@ -130,3 +129,7 @@ issue](https://github.com/drozdziak1/nip/issues/7) for progress on the solution.
   in a form that IPFS understands. **However, nip guarantees object
   deduplication for _all_ repos you use with it, which greatly reduces the
   problem e.g. when you're working on different forks of the same project**
+* Object size - nip doesn't know yet how to stream objects into/out of the
+  local repository and will attempt to load them into RAM, this increases the
+  memory footprint substantially for repos that posess large objects. Tracked
+  [here](https://github.com/drozdziak1/nip/issues/8)
