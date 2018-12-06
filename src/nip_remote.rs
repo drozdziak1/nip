@@ -17,8 +17,8 @@ pub enum NIPRemote {
 pub enum NIPRemoteParseError {
     #[fail(display = "Got a hash {} chars long, expected {}", _0, _1)]
     InvalidHashLength(usize, usize),
-    #[fail(display = "Invalid link format")]
-    InvalidLinkFormat,
+    #[fail(display = "Invalid link format for string \"{}\"", _0)]
+    InvalidLinkFormat(String),
     #[fail(display = "Failed to parse remote type: {}", _0)]
     Other(String),
 }
@@ -45,7 +45,7 @@ impl FromStr for NIPRemote {
                 let hash = existing_ipns
                     .split('/')
                     .nth(2)
-                    .ok_or(NIPRemoteParseError::InvalidLinkFormat)?;
+                    .ok_or(NIPRemoteParseError::InvalidLinkFormat(existing_ipns.to_owned()))?;
                 if hash.len() != IPFS_HASH_LEN {
                     return Err(
                         NIPRemoteParseError::InvalidHashLength(hash.len(), IPFS_HASH_LEN).into(),
@@ -53,7 +53,7 @@ impl FromStr for NIPRemote {
                 }
                 Ok(NIPRemote::ExistingIPNS(hash.to_owned()))
             }
-            _other => Err(NIPRemoteParseError::InvalidLinkFormat.into()),
+            other => Err(NIPRemoteParseError::InvalidLinkFormat(other.to_owned()).into()),
         }
     }
 }
