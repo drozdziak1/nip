@@ -310,7 +310,7 @@ fn handle_fetches_and_pushes(
     debug!("Previous IPFS hash: {}", remote_type.to_string());
     debug!("New IPFS hash:      {}", new_remote_type.to_string());
     info!(
-        "New URL: {}",
+        "Current URL: {}",
         new_repo_url
     );
 
