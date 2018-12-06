@@ -40,7 +40,7 @@ use nip_index::NIPIndex;
 use nip_remote::NIPRemote;
 
 static USAGE: &'static str = "
-NIP - the IPFS git remote helper that puts your repo objects Nowhere In Particular.
+nip - the IPFS git remote helper that puts your repo objects Nowhere In Particular.
 
 Usage: git-remote-nip <remote> <mode-or-hash>
        git-remote-nip --help

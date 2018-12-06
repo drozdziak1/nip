@@ -5,11 +5,11 @@ use std::{str::FromStr, string::ToString};
 use constants::IPFS_HASH_LEN;
 
 #[derive(Clone, Debug, PartialEq)]
-/// A representation of a NIP remote repository
+/// A representation of a nip remote repository
 pub enum NIPRemote {
     ExistingIPFS(String), // Use a supplied existing repo hash
     ExistingIPNS(String), // Resolve and use an existing IPNS record
-    NewIPFS,              // Create a brand new IPFS-hosted NIP repo
+    NewIPFS,              // Create a brand new IPFS-hosted nip repo
     NewIPNS,              // Update local IPNS record. TODO: Support using a specified IPNS key
 }
 
