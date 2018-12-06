@@ -5,23 +5,13 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
-extern crate byteorder;
 extern crate docopt;
-extern crate env_logger;
-extern crate futures;
 extern crate git2;
-extern crate hyper;
 extern crate ipfs_api;
-extern crate libc;
 extern crate serde;
-extern crate serde_cbor;
 extern crate tokio_core;
 
-mod constants;
-mod nip_index;
-mod nip_object;
-mod nip_remote;
-mod util;
+extern crate nip_core;
 
 use docopt::Docopt;
 use failure::Error;
@@ -36,8 +26,7 @@ use std::{
     process,
 };
 
-use nip_index::NIPIndex;
-use nip_remote::NIPRemote;
+use nip_core::{NIPIndex, NIPRemote};
 
 static USAGE: &'static str = "
 nip - the IPFS git remote helper that puts your repo objects Nowhere In Particular.
@@ -57,7 +46,7 @@ struct NIPArgs {
 }
 
 fn main() {
-    util::init_logging(LevelFilter::Info);
+    nip_core::init_logging(LevelFilter::Info);
 
     let args: NIPArgs = Docopt::new(USAGE)
         .and_then(|d| {
@@ -309,10 +298,7 @@ fn handle_fetches_and_pushes(
 
     debug!("Previous IPFS hash: {}", remote_type.to_string());
     debug!("New IPFS hash:      {}", new_remote_type.to_string());
-    info!(
-        "Current URL: {}",
-        new_repo_url
-    );
+    info!("Current URL: {}", new_repo_url);
 
     repo.remote_set_url(remote_name, &new_repo_url)?;
 
