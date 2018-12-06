@@ -6,7 +6,11 @@ use git2::{Object, ObjectType, Oid, Repository};
 use ipfs_api::IpfsClient;
 use tokio_core::reactor::Core;
 
-use std::{cmp::Ordering, collections::BTreeMap, io::Cursor};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashSet},
+    io::Cursor,
+};
 
 use constants::{NIP_HEADER_LEN, NIP_PROTOCOL_VERSION};
 use nip_object::{NIPObject, NIPObjectMetadata};
@@ -74,7 +78,7 @@ impl NIPIndex {
         }
     }
 
-    /// Dereference object_ref and add it to IPFS and the index
+    /// Dereference `ref_src` and add it to the index on IPFS.
     pub fn push_ref_from_str(
         &mut self,
         ref_src: &str,
@@ -82,30 +86,47 @@ impl NIPIndex {
         repo: &mut Repository,
         ipfs: &mut IpfsClient,
     ) -> Result<(), Error> {
-        let reference = repo.find_reference(ref_src)?;
+        let reference = repo.find_reference(ref_src)?.resolve()?;
 
-        let obj = if reference.is_tag() {
-            reference.resolve()?.peel(ObjectType::Tag)?
-        } else {
-            reference.resolve()?.peel(ObjectType::Commit)?
-        };
+        // Differentiate between annotated tags and their commit representation
+        let obj = reference
+            .peel(ObjectType::Tag)
+            .unwrap_or(reference.peel(ObjectType::Commit)?);
 
-        debug!("{:?} dereferenced to {}", reference.shorthand(), obj.id());
-        let _ref_obj_hash = self.push_object_dag(obj.clone(), repo, ipfs)?;
+        debug!(
+            "{:?} dereferenced to {:?} {}",
+            reference.shorthand(),
+            obj.kind(),
+            obj.id()
+        );
+
+        let objs_for_push = self.enumerate_for_push(obj.clone(), repo, ipfs)?;
+        debug!(
+            "Counted {} object(s) for push:\n{:#?}",
+            objs_for_push.len(),
+            objs_for_push
+        );
+
+        self.push_git_objects(&objs_for_push, repo, ipfs)?;
         self.refs
             .insert(ref_dst.to_owned(), format!("{}", obj.id()));
         Ok(())
     }
 
-    /// Check what `reference` is and recursively add it along with any objects it may reference. The
-    /// top-level object's IPFS hash is returned.
-    pub fn push_object_dag(
+    /// Check an object ID for git object tree nodes missing in the index; return a list of
+    /// object ids that need to be pushed in order to update the remote.
+    pub fn enumerate_for_push(
         &mut self,
         obj: Object,
         repo: &Repository,
         ipfs: &mut IpfsClient,
-    ) -> Result<String, Error> {
-        trace!("Current object: {:?} at {}", obj.kind(), obj.id());
+    ) -> Result<HashSet<Oid>, Error> {
+        let mut ret = HashSet::new();
+
+        if self.objects.contains_key(&obj.id().to_string()) {
+            trace!("Object {} already in nip index", obj.id());
+            return Ok(ret);
+        }
 
         let obj_type = obj.kind().ok_or_else(|| {
             let msg = format!("Cannot determine type of object {}", obj.id());
@@ -113,22 +134,23 @@ impl NIPIndex {
             format_err!("{}", msg)
         })?;
 
-        if self.objects.contains_key(&obj.id().to_string()) {
-            trace!("Object already in nip index: {} {}", obj_type, obj.id());
-            return Ok(self.objects[&obj.id().to_string()].clone());
-        }
+        ret.insert(obj.id());
 
         match obj_type {
             ObjectType::Commit => {
                 let commit = obj
                     .as_commit()
                     .ok_or_else(|| format_err!("Could not view {:?} as a commit", obj))?;
-                trace!("Handling commit {:?}", commit);
+                debug!("Counting commit {:?}", commit);
 
                 let tree_obj = obj.peel(ObjectType::Tree)?;
                 trace!("Commit {}: Handling tree {}", commit.id(), tree_obj.id());
+
                 // Every commit has a tree
-                let _tree_hash = self.push_object_dag(tree_obj, repo, ipfs)?;
+                ret = ret
+                    .union(&self.enumerate_for_push(tree_obj, repo, ipfs)?)
+                    .cloned()
+                    .collect();
 
                 for parent in commit.parents().into_iter() {
                     trace!(
@@ -136,27 +158,19 @@ impl NIPIndex {
                         commit.id(),
                         parent.id()
                     );
-                    let _parent_hash = self.push_object_dag(parent.into_object(), repo, ipfs)?;
+                    ret = ret
+                        .union(&self.enumerate_for_push(parent.into_object(), repo, ipfs)?)
+                        .cloned()
+                        .collect();
                 }
 
-                let nip_object_hash =
-                    NIPObject::from_git_commit(&commit, &repo.odb()?, ipfs)?.ipfs_add(ipfs)?;
-
-                self.objects
-                    .insert(format!("{}", obj.id()), nip_object_hash.clone());
-                debug!(
-                    "Commit {} ({:?}) uploaded to {}",
-                    obj.id(),
-                    obj_type,
-                    nip_object_hash
-                );
-                return Ok(nip_object_hash);
+                return Ok(ret);
             }
             ObjectType::Tree => {
                 let tree = obj
                     .as_tree()
                     .ok_or_else(|| format_err!("Could not view {:?} as a tree", obj))?;
-                debug!("Handling tree {:?}", tree);
+                debug!("Counting tree {:?}", tree);
 
                 for entry in tree.into_iter() {
                     trace!(
@@ -165,104 +179,187 @@ impl NIPIndex {
                         entry.id(),
                         entry.kind()
                     );
-                    let _entry_hash = self.push_object_dag(
-                        repo.find_object(entry.id(), entry.kind())?,
-                        repo,
-                        ipfs,
-                    )?;
+                    ret = ret
+                        .union(&self.enumerate_for_push(
+                            repo.find_object(entry.id(), entry.kind())?,
+                            repo,
+                            ipfs,
+                        )?).cloned()
+                        .collect();
                 }
 
-                let nip_object_hash =
-                    NIPObject::from_git_tree(&tree, &repo.odb()?, ipfs)?.ipfs_add(ipfs)?;
-
-                self.objects
-                    .insert(format!("{}", obj.id()), nip_object_hash.clone());
-                debug!(
-                    "Tree {} ({:?}) uploaded to {}",
-                    obj.id(),
-                    obj_type,
-                    nip_object_hash
-                );
-                return Ok(nip_object_hash);
+                return Ok(ret);
             }
             ObjectType::Blob => {
                 let blob = obj
                     .as_blob()
                     .ok_or_else(|| format_err!("Could not view {:?} as a blob", obj))?;
-                trace!("Handling blob {:?}", blob);
+                debug!("Counting blob {:?}", blob);
 
-                let nip_object_hash =
-                    NIPObject::from_git_blob(&blob, &repo.odb()?, ipfs)?.ipfs_add(ipfs)?;
-
-                self.objects
-                    .insert(format!("{}", obj.id()), nip_object_hash.clone());
-                debug!(
-                    "Blob {} ({:?}) uploaded to {}",
-                    obj.id(),
-                    obj_type,
-                    nip_object_hash
-                );
-                return Ok(nip_object_hash);
+                return Ok(ret);
             }
             ObjectType::Tag => {
                 let tag = obj
                     .as_tag()
                     .ok_or_else(|| format_err!("Could not view {:?} as a tag", obj))?;
+                debug!("Counting tag {:?}", tag);
 
-                let nip_object_hash =
-                    NIPObject::from_git_tag(&tag, &repo.odb()?, ipfs)?.ipfs_add(ipfs)?;
+                ret = ret
+                    .union(&self.enumerate_for_push(tag.target()?, repo, ipfs)?)
+                    .cloned()
+                    .collect();
 
-                self.objects
-                    .insert(format!("{}", obj.id()), nip_object_hash.clone());
-
-                debug!(
-                    "Tag {} ({:?}) uploaded to {}",
-                    obj.id(),
-                    obj_type,
-                    nip_object_hash
-                );
-                return Ok(nip_object_hash);
+                return Ok(ret);
             }
             other => bail!("Don't know how to traverse a {}", other),
         }
     }
 
+    /// Take `oids` and upload underlying objects to IPFS
+    pub fn push_git_objects(
+        &mut self,
+        oids: &HashSet<Oid>,
+        repo: &Repository,
+        ipfs: &mut IpfsClient,
+    ) -> Result<(), Error> {
+        for (i, oid) in oids.iter().enumerate() {
+            let obj = repo.find_object(*oid, None)?;
+            trace!("Current object: {:?} at {}", obj.kind(), obj.id());
+
+            if self.objects.contains_key(&obj.id().to_string()) {
+                warn!("push_objects: Object {} already in nip index", obj.id());
+                continue;
+            }
+
+            let obj_type = obj.kind().ok_or_else(|| {
+                let msg = format!("Cannot determine type of object {}", obj.id());
+                error!("{}", msg);
+                format_err!("{}", msg)
+            })?;
+
+            match obj_type {
+                ObjectType::Commit => {
+                    let commit = obj
+                        .as_commit()
+                        .ok_or_else(|| format_err!("Could not view {:?} as a commit", obj))?;
+                    trace!("Pushing commit {:?}", commit);
+
+                    let nip_object_hash =
+                        NIPObject::from_git_commit(&commit, &repo.odb()?, ipfs)?.ipfs_add(ipfs)?;
+
+                    self.objects
+                        .insert(format!("{}", obj.id()), nip_object_hash.clone());
+                    debug!(
+                        "[{}/{}] Commit {} uploaded to {}",
+                        i + 1,
+                        oids.len(),
+                        obj.id(),
+                        nip_object_hash
+                    );
+                }
+                ObjectType::Tree => {
+                    let tree = obj
+                        .as_tree()
+                        .ok_or_else(|| format_err!("Could not view {:?} as a tree", obj))?;
+                    trace!("Pushing tree {:?}", tree);
+
+                    let nip_object_hash =
+                        NIPObject::from_git_tree(&tree, &repo.odb()?, ipfs)?.ipfs_add(ipfs)?;
+
+                    self.objects
+                        .insert(format!("{}", obj.id()), nip_object_hash.clone());
+                    debug!(
+                        "[{}/{}] Tree {} uploaded to {}",
+                        i + 1,
+                        oids.len(),
+                        obj.id(),
+                        nip_object_hash
+                    );
+                }
+                ObjectType::Blob => {
+                    let blob = obj
+                        .as_blob()
+                        .ok_or_else(|| format_err!("Could not view {:?} as a blob", obj))?;
+                    trace!("Pushing blob {:?}", blob);
+
+                    let nip_object_hash =
+                        NIPObject::from_git_blob(&blob, &repo.odb()?, ipfs)?.ipfs_add(ipfs)?;
+
+                    self.objects
+                        .insert(format!("{}", obj.id()), nip_object_hash.clone());
+                    debug!(
+                        "[{}/{}] Blob {} uploaded to {}",
+                        i + 1,
+                        oids.len(),
+                        obj.id(),
+                        nip_object_hash
+                    );
+                }
+                ObjectType::Tag => {
+                    let tag = obj
+                        .as_tag()
+                        .ok_or_else(|| format_err!("Could not view {:?} as a tag", obj))?;
+                    trace!("Pushing tag {:?}", tag);
+
+                    let nip_object_hash =
+                        NIPObject::from_git_tag(&tag, &repo.odb()?, ipfs)?.ipfs_add(ipfs)?;
+
+                    self.objects
+                        .insert(format!("{}", obj.id()), nip_object_hash.clone());
+
+                    debug!(
+                        "[{}/{}] Tag {} uploaded to {}",
+                        i + 1,
+                        oids.len(),
+                        obj.id(),
+                        nip_object_hash
+                    );
+                }
+                other => bail!("Don't know how to traverse a {}", other),
+            }
+        }
+        Ok(())
+    }
+
+    /// Fetch `git_hash` to `ref_name`
     pub fn fetch_to_ref_from_str(
         &mut self,
-        hash_to_fetch: &str,
-        target_ref_name: &str,
+        git_hash: &str,
+        ref_name: &str,
         repo: &mut Repository,
         ipfs: &mut IpfsClient,
     ) -> Result<(), Error> {
-        debug!("Fetching {} for {}", hash_to_fetch, target_ref_name);
+        debug!("Fetching {} for {}", git_hash, ref_name);
 
         let nip_obj_ipfs_hash = self
             .objects
-            .get(hash_to_fetch)
+            .get(git_hash)
             .ok_or_else(|| {
-                let msg = format!("Could not find object {} in the nip index", hash_to_fetch);
+                let msg = format!("Could not find object {} in the nip index", git_hash);
                 error!("{}", msg);
                 format_err!("{}", msg)
             })?.clone();
 
-        let new_tip_oid = self.fetch_nip_object_dag(&nip_obj_ipfs_hash, repo, ipfs)?;
-        if new_tip_oid != Oid::from_str(&hash_to_fetch)? {
-            let msg = format!(
-                "tip of {} fetch failed: Object tree inconsistency detected; fetched {} from {}, but write result hashes to {}",
-                target_ref_name, hash_to_fetch, nip_obj_ipfs_hash, new_tip_oid
-                );
+        let git_hash_oid = Oid::from_str(git_hash)?;
+        let oids_for_fetch = self.enumerate_for_fetch(git_hash_oid, repo, ipfs)?;
+        debug!(
+            "Counted {} object(s) for fetch:\n{:#?}",
+            oids_for_fetch.len(),
+            oids_for_fetch
+        );
 
-            error!("{}", msg);
-            bail!("{}", msg);
-        }
+        self.fetch_nip_objects(oids_for_fetch, repo, ipfs)?;
 
-        match repo.odb()?.read_header(new_tip_oid)?.1 {
+        match repo.odb()?.read_header(git_hash_oid)?.1 {
+            ObjectType::Commit if ref_name.starts_with("refs/tags") => {
+                debug!("Not setting ref for lightweight tag {}", ref_name);
+            }
             ObjectType::Commit => {
-                repo.reference(target_ref_name, new_tip_oid, false, "nip fetch")?;
+                repo.reference(ref_name, git_hash_oid, true, "nip fetch")?;
             }
             // Somehow git is upset when we set tag refs for it
             ObjectType::Tag => {
-                debug!("Not setting ref for tag {}", new_tip_oid);
+                debug!("Not setting ref for tag {}", ref_name);
             }
             other_type => {
                 let msg = format!("New tip turned out to be a {} after fetch", other_type);
@@ -271,161 +368,129 @@ impl NIPIndex {
             }
         }
 
-        debug!("Fetched {} for {} OK.", hash_to_fetch, target_ref_name);
+        debug!("Fetched {} for {} OK.", git_hash, ref_name);
         Ok(())
     }
 
-    pub fn fetch_nip_object_dag(
+    /// Query the index for the object tree starting at `oid`, return deduplicated object IDs.
+    pub fn enumerate_for_fetch(
         &mut self,
-        nip_obj_ipfs_hash: &str,
+        oid: Oid,
         repo: &mut Repository,
         ipfs: &mut IpfsClient,
-    ) -> Result<Oid, Error> {
-        let nip_obj = NIPObject::ipfs_get(nip_obj_ipfs_hash, ipfs)?;
+    ) -> Result<HashSet<Oid>, Error> {
+        let mut ret = HashSet::new();
 
-        trace!(
-            "Current nip object at {}:\n{:#?}",
-            nip_obj_ipfs_hash,
-            nip_obj,
-        );
+        if let Ok(_) = repo.odb()?.read_header(oid) {
+            trace!("Object {} already present locally!", oid);
+            return Ok(ret);
+        }
+
+        let nip_obj_ipfs_hash = self
+            .objects
+            .get(&format!("{}", oid))
+            .ok_or_else(|| {
+                let msg = format!("Could not find object {} in the index", oid);
+                error!("{}", msg);
+                format_err!("{}", msg)
+            })?.clone();
+
+        // Inserting only makes sense after we knowthat the object is there at all
+        ret.insert(oid);
+
+        let nip_obj = NIPObject::ipfs_get(&nip_obj_ipfs_hash, ipfs)?;
 
         match nip_obj.clone().metadata {
             NIPObjectMetadata::Commit {
                 parent_git_hashes,
                 tree_git_hash,
             } => {
-                trace!("Handling nip commit {}", nip_obj_ipfs_hash);
+                debug!("Counting nip commit {}", nip_obj_ipfs_hash);
 
-                let tree_ipfs_hash = self
-                    .objects
-                    .get(&tree_git_hash)
-                    .ok_or_else(|| {
-                        let msg =
-                            format!("Could not find the IPFS hash for tree {}", tree_git_hash);
-                        error!("{}", msg);
-                        format_err!("{}", msg)
-                    })?.clone();
-
-                trace!(
-                    "nip commit {}: Handling nip tree at {}",
-                    nip_obj_ipfs_hash,
-                    tree_ipfs_hash
-                );
-
-                let tree_oid = self.fetch_nip_object_dag(&tree_ipfs_hash, repo, ipfs)?;
-                if tree_oid != Oid::from_str(&tree_git_hash)? {
-                    let msg = format!(
-                        "nip commit {}: Object tree inconsistency detected; fetched {} from {}, but write result hashes to {}",
-                        nip_obj_ipfs_hash, tree_git_hash, tree_ipfs_hash, tree_oid);
-
-                    error!("{}", msg);
-                    bail!("{}", msg);
-                }
+                ret = ret
+                    .union(&self.enumerate_for_fetch(Oid::from_str(&tree_git_hash)?, repo, ipfs)?)
+                    .cloned()
+                    .collect();
 
                 for parent_git_hash in parent_git_hashes {
-                    let parent_ipfs_hash = self
-                        .objects
-                        .get(&parent_git_hash)
-                        .ok_or_else(|| {
-                            let msg = format!(
-                                "nip commit {}: Could not find the IPFS hash for parent commit {}",
-                                nip_obj_ipfs_hash, parent_git_hash
-                            );
-                            error!("{}", msg);
-                            format_err!("{}", msg)
-                        })?.clone();
-
-                    trace!(
-                        "nip commit {}: Handling nip parent commit at {}",
-                        nip_obj_ipfs_hash,
-                        parent_ipfs_hash
-                    );
-
-                    let parent_oid = self.fetch_nip_object_dag(&parent_ipfs_hash, repo, ipfs)?;
-                    if parent_oid != Oid::from_str(&parent_git_hash)? {
-                        let msg = format!(
-                            "Object tree inconsistency detected; fetched {} from {}, but write result hashes to {}",
-                            parent_git_hash, nip_obj_ipfs_hash, parent_oid);
-
-                        error!("{}", msg);
-                        bail!("{}", msg);
-                    }
+                    ret = ret
+                        .union(&self.enumerate_for_fetch(
+                            Oid::from_str(&parent_git_hash)?,
+                            repo,
+                            ipfs,
+                        )?).cloned()
+                        .collect();
                 }
             }
             NIPObjectMetadata::Tag { target_git_hash } => {
-                trace!("Handling nip tag {}", nip_obj_ipfs_hash);
+                debug!("Counting nip tag {}", nip_obj_ipfs_hash);
 
-                let target_ipfs_hash = self
-                    .objects
-                    .get(&target_git_hash)
-                    .ok_or_else(|| {
-                        let msg = format!(
-                            "Could not find the IPFS hash for target {}",
-                            target_git_hash
-                        );
-                        error!("{}", msg);
-                        format_err!("{}", msg)
-                    })?.clone();
-
-                trace!(
-                    "nip tag {}: Handling nip target at {}",
-                    nip_obj_ipfs_hash,
-                    target_ipfs_hash
-                );
-
-                let target_oid = self.fetch_nip_object_dag(&target_ipfs_hash, repo, ipfs)?;
-                if target_oid != Oid::from_str(&target_git_hash)? {
-                    let msg = format!(
-                        "Object tree inconsistency detected; fetched {} from {}, but write result hashes to {}",
-                        target_git_hash, target_ipfs_hash, target_oid);
-
-                    error!("{}", msg);
-                    bail!("{}", msg);
-                }
+                ret = ret
+                    .union(&self.enumerate_for_fetch(
+                        Oid::from_str(&target_git_hash)?,
+                        repo,
+                        ipfs,
+                    )?).cloned()
+                    .collect();
             }
             NIPObjectMetadata::Tree { entry_git_hashes } => {
-                trace!("Handling nip tree {}", nip_obj_ipfs_hash);
+                trace!("Counting nip tree {}", nip_obj_ipfs_hash);
 
                 for entry_git_hash in entry_git_hashes {
-                    let tree_entry_ipfs_hash = self
-                        .objects
-                        .get(&entry_git_hash)
-                        .ok_or_else(|| {
-                            let msg = format!(
-                                "nip tree {}: Could not find the IPFS hash for entry {}",
-                                nip_obj_ipfs_hash, entry_git_hash
-                            );
-                            error!("{}", msg);
-                            format_err!("{}", msg)
-                        })?.clone();
-
-                    trace!(
-                        "nip tree {}: Handling nip tree entry at {}",
-                        nip_obj_ipfs_hash,
-                        tree_entry_ipfs_hash
-                    );
-
-                    let entry_oid = self.fetch_nip_object_dag(&tree_entry_ipfs_hash, repo, ipfs)?;
-                    if entry_oid != Oid::from_str(&entry_git_hash)? {
-                        let msg = format!(
-                            "nip tree {}: Object tree inconsistency detected; fetched {} from {}, but write result hashes to {}",
-                            nip_obj_ipfs_hash, entry_git_hash, nip_obj_ipfs_hash, entry_oid);
-
-                        error!("{}", msg);
-                        bail!("{}", msg);
-                    }
+                    ret = ret
+                        .union(&self.enumerate_for_fetch(
+                            Oid::from_str(&entry_git_hash)?,
+                            repo,
+                            ipfs,
+                        )?).cloned()
+                        .collect();
                 }
             }
             NIPObjectMetadata::Blob => {
-                trace!("Handling nip blob {}", nip_obj_ipfs_hash);
+                trace!("Counting nip blob {}", nip_obj_ipfs_hash);
             }
         }
 
-        let oid = nip_obj.write_raw_data(&mut repo.odb()?, ipfs)?;
-        debug!("Fetched object {} to {}", nip_obj_ipfs_hash, oid);
-        Ok(oid)
+        Ok(ret)
     }
 
+    /// Instantiate objects under `oids` in the local git repo.
+    pub fn fetch_nip_objects(
+        &mut self,
+        oids: HashSet<Oid>,
+        repo: &mut Repository,
+        ipfs: &mut IpfsClient,
+    ) -> Result<(), Error> {
+        for (i, &oid) in oids.iter().enumerate() {
+            debug!("[{}/{}] Fetching object {}", i + 1, oids.len(), oid);
+
+            let nip_obj_ipfs_hash = self.objects.get(&format!("{}", oid)).ok_or_else(|| {
+                let msg = format!("Could not find object {} in nip index", oid);
+                error!("{}", msg);
+                format_err!("{}", msg)
+            })?;
+
+            let nip_obj = NIPObject::ipfs_get(nip_obj_ipfs_hash, ipfs)?;
+
+            trace!("nip object at {}:\n{:#?}", nip_obj_ipfs_hash, nip_obj,);
+
+            if let Ok(_) = repo.odb()?.read_header(oid) {
+                warn!("fetch_nip_objects: Object {} already present locally!", oid);
+                continue;
+            }
+
+            let written_oid = nip_obj.write_raw_data(&mut repo.odb()?, ipfs)?;
+            if written_oid != oid {
+                let msg = format!("Object tree inconsistency detected: fetched {} from {}, but write result hashes to {}", oid, nip_obj_ipfs_hash, written_oid);
+                error!("{}", msg);
+                bail!("{}", msg);
+            }
+            trace!("Fetched object {} to {}", nip_obj_ipfs_hash, written_oid);
+        }
+        Ok(())
+    }
+
+    /// Upload `self` to IPFS and return the IPFS link.
     pub fn ipfs_add(&mut self, ipfs: &mut IpfsClient) -> Result<String, Error> {
         let mut event_loop = Core::new()?;
         let mut self_buf = gen_nip_header(None)?;
