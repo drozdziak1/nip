@@ -105,7 +105,11 @@ in the `NIPIndex` which is always downloaded first). Also, this practice makes
 the format less forgiving and therefore less prone to being incorrectly used.
 
 ## How does nip intend to stay backwards-compatible?
-
+Internally, nip prepends every serialized `NIPIndex` and `NIPObject` with a very
+simple 8-byte header. It starts with a `b"NIPNIP"` magic followed by a
+big-endian 16-bit number denoting the version of the data format a given object
+uses. This ensures that even when the serialization format is changed or even if
+`serde` is no longer used, `nip` will still be able to find out in time.
 
 # Development
 If you'd like to hack on nip, the `dev_bootstrap.sh` script is where you should
