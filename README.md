@@ -3,8 +3,10 @@ nip is a git remote helper that'll put your repo's objects on IPFS - i.e.
 **Nowhere In Particular**.
 
 # Installation
-The `nip` package is not listed on crates.io yet, but like with many Rust
-packages, in due time the easiest way to install will be using Cargo:
+The `nip` package is not listed on crates.io yet (the plan is to publish it once
+[this milestone](https://github.com/drozdziak1/nip/milestone/1) is complete),
+but like with most Rust packages, in due time the easiest way to install will be
+using Cargo:
 ```shell
 $ cargo install nip # Doesn't work yet!
 ```
