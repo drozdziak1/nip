@@ -42,10 +42,9 @@ impl FromStr for NIPRemote {
                 Ok(NIPRemote::ExistingIPFS(hash.to_owned()))
             }
             existing_ipns if existing_ipns.starts_with("/ipns/") => {
-                let hash = existing_ipns
-                    .split('/')
-                    .nth(2)
-                    .ok_or(NIPRemoteParseError::InvalidLinkFormat(existing_ipns.to_owned()))?;
+                let hash = existing_ipns.split('/').nth(2).ok_or(
+                    NIPRemoteParseError::InvalidLinkFormat(existing_ipns.to_owned()),
+                )?;
                 if hash.len() != IPFS_HASH_LEN {
                     return Err(
                         NIPRemoteParseError::InvalidHashLength(hash.len(), IPFS_HASH_LEN).into(),
@@ -88,7 +87,7 @@ mod tests {
         match "gibberish".parse::<NIPRemote>() {
             Err(e) => assert_eq!(
                 e.downcast::<NIPRemoteParseError>().unwrap(),
-                NIPRemoteParseError::InvalidLinkFormat
+                NIPRemoteParseError::InvalidLinkFormat("gibberish".to_owned())
             ),
             Ok(_) => panic!("Got an Ok, InvalidLinkFormat expected"),
         }
@@ -100,7 +99,10 @@ mod tests {
         match bs_hash.clone().parse::<NIPRemote>() {
             Err(e) => assert_eq!(
                 e.downcast::<NIPRemoteParseError>().unwrap(),
-                NIPRemoteParseError::InvalidHashLength(bs_hash.len(), IPFS_HASH_LEN)
+                NIPRemoteParseError::InvalidHashLength(
+                    bs_hash.len() - 6, // invalid hash len applies to the Qm* part only
+                    IPFS_HASH_LEN
+                )
             ),
             Ok(_) => panic!("Got an Ok, InvalidHashLength expected"),
         }

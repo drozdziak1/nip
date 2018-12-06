@@ -43,7 +43,7 @@ pub fn main() {
         "refs/heads/master".to_owned(),
         "529885ae94597ffdc9c8adae9b643f103c590b88".to_owned(),
     );
-    let mut objects = BTreeMap::new();
+    let objects = BTreeMap::new();
 
     let idx = NIPIndex {
         refs,
@@ -55,7 +55,7 @@ pub fn main() {
     drop(idx);
     info!("Full serialized bytefield: {:?}", buf.clone());
 
-    let mut ipfs = IpfsClient::default();
+    let ipfs = IpfsClient::default();
 
     let req = ipfs.add(Cursor::new(buf));
     let mut event_loop = Core::new().unwrap();
