@@ -18,7 +18,6 @@ use failure::Error;
 use git2::Repository;
 use ipfs_api::IpfsClient;
 use log::LevelFilter;
-use tokio_core::reactor::Core;
 
 use std::{
     env, io,
@@ -54,7 +53,8 @@ fn main() {
                 .version(Some(env!("CARGO_PKG_VERSION").to_owned()))
                 .argv(env::args())
                 .deserialize()
-        }).unwrap_or_else(|e| e.exit());
+        })
+        .unwrap_or_else(|e| e.exit());
 
     trace!("Args: {:#?}", args);
 
@@ -80,7 +80,8 @@ fn main() {
         &args.arg_remote,
         &mut ipfs,
         &mut idx,
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 fn handle_capabilities(input_handle: &mut BufRead, output_handle: &mut Write) -> Result<(), Error> {
@@ -226,7 +227,7 @@ fn handle_fetches_and_pushes(
 
                 // Upload the object tree
                 idx.push_ref_from_str(src, dst, repo, ipfs)?;
-                debug!("Index after upload: {:#?}", idx);
+                debug!("Index after push: {:#?}", idx);
 
                 // Tell git we're done with this ref
                 writeln!(output_handle, "ok {}", dst)?;
@@ -247,19 +248,8 @@ fn handle_fetches_and_pushes(
         }
     }
 
-    let new_hash = idx.ipfs_add(ipfs)?;
-
-    let new_remote_type: NIPRemote = match remote_type {
-        NIPRemote::NewIPFS | NIPRemote::ExistingIPFS(..) => new_hash.parse()?,
-        NIPRemote::NewIPNS | NIPRemote::ExistingIPNS(..) => {
-            let mut event_loop = Core::new()?;
-
-            let publish_req = ipfs.name_publish(&new_hash, true, None, None, None);
-
-            let ipns_hash = format!("/ipns/{}", event_loop.run(publish_req)?.name);
-            ipns_hash.parse()?
-        }
-    };
+    // Upload the index itself
+    let new_remote_type = idx.ipfs_add(ipfs, Some(remote_type))?;
 
     let new_repo_url = match &new_remote_type {
         NIPRemote::NewIPFS | NIPRemote::NewIPNS => {
@@ -274,8 +264,11 @@ fn handle_fetches_and_pushes(
                     let msg = format!("Could not get URL for remote {}", remote_name);
                     error!("{}", msg);
                     format_err!("{}", msg)
-                })?.to_owned();
+                })?
+                .to_owned();
+
             trace!("Existing full URL is {}", full_url);
+
             match full_url {
                 ref _nipdev if _nipdev.starts_with("nipdev") => {
                     info!("nipdev detected!");
