@@ -555,7 +555,7 @@ dependencies = [
 [[package]]
 name = "nip_core"
 version = "0.1.0"
-source = "git+https://github.com/drozdziak1/nip_core.git#213f9d58481b50f7f4bcc8af7d72a66002340376"
+source = "git+https://github.com/drozdziak1/nip_core.git#34444d4969d8630ac63c335af5a3daba6484e9e4"
 dependencies = [
  "byteorder 1.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.5.13 (registry+https://github.com/rust-lang/crates.io-index)",
