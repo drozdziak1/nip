@@ -30,7 +30,7 @@ pub fn main() {
                 .about("Prints out a nip IPFS/IPNS link of any type human-readably")
                 .arg(
                     Arg::with_name("ipfs_hash")
-                        .help("The IPFS/IPNS hash to get the index from")
+                        .help("The IPFS/IPNS hash to get the target from")
                         .required(true)
                         .index(1),
                 )
@@ -57,6 +57,8 @@ pub fn main() {
             let nip_remote: NIPRemote = matches
                 .value_of("ipfs_hash")
                 .unwrap()
+                .replace("nip::", "")
+                .replace("nipdev::", "")
                 .parse()
                 .unwrap_or_else(|e: Error| {
                     error!("{}", e);
