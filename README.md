@@ -3,12 +3,10 @@ nip is a git remote helper that'll put your repo's objects on IPFS - i.e.
 **Nowhere In Particular**.
 
 # Installation
-The `nip` package is not listed on crates.io yet (the plan is to publish it once
-[this milestone](https://github.com/drozdziak1/nip/milestone/1) is complete),
-but like with most Rust packages, in due time the easiest way to install will be
+Like with most Rust packages, the easiest way to install will be
 using Cargo:
 ```shell
-$ cargo install nip # Doesn't work yet!
+$ cargo install nip
 ```
 # Usage
 **Important:** Before you try to use nip please make sure that your local IPFS
@@ -16,7 +14,7 @@ instance is running on its standard port.
 
 ## Pushing an existing repo to a nip remote for the first time
 ```shell
-$ git remote add nip nip::new-ipfs # Add a magic remote URL for a new IPFS repo
+$ git remote add nip nip::new-ipfs # Use a magic placeholder URL representing a new IPFS repo
 $ git push --all nip # Push all refs to a brand new repo
  INFO 2018-12-01T15:13:00Z: git_remote_nip: nip Remote nip moves onto a new
 hash:
