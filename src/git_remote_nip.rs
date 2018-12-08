@@ -222,7 +222,13 @@ fn handle_fetches_and_pushes(
                 debug!("Parsed dst: {}", dst);
 
                 // Upload the object tree
-                current_idx.push_ref_from_str(src, dst, repo, ipfs)?;
+                match current_idx.push_ref_from_str(src, dst, force, repo, ipfs) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        writeln!(output_handle, "error {} \"{}\"", dst, e)?;
+                        continue;
+                    }
+                }
                 debug!("Index after push: {:#?}", current_idx);
 
                 // Tell git we're done with this ref
@@ -248,7 +254,7 @@ fn handle_fetches_and_pushes(
     match current_idx {
         ref unchanged_idx if unchanged_idx == idx => {
             info!(
-                "Current URL not changed: {}",
+                "Current URL: {} (not changed)",
                 repo.find_remote(remote_name)?
                     .url()
                     .ok_or_else(|| {
