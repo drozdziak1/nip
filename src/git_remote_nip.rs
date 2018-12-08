@@ -58,17 +58,17 @@ fn main() {
 
     trace!("Args: {:#?}", args);
 
-    let remote_type: NIPRemote = args.arg_mode_or_hash.parse().unwrap();
+    let nip_remote: NIPRemote = args.arg_mode_or_hash.parse().unwrap();
 
     let mut ipfs = IpfsClient::default();
-    let mut idx = NIPIndex::from_nip_remote(&remote_type, &mut ipfs).unwrap();
+    let mut idx = NIPIndex::from_nip_remote(&nip_remote, &mut ipfs).unwrap();
     trace!("Using index {:#?}", idx);
 
     let mut input_handle = BufReader::new(io::stdin());
     let mut output_handle = io::stdout();
 
     handle_capabilities(&mut input_handle, &mut output_handle).unwrap();
-    handle_list(&mut input_handle, &mut output_handle, &remote_type, &idx).unwrap();
+    handle_list(&mut input_handle, &mut output_handle, &nip_remote, &idx).unwrap();
 
     let mut repo = Repository::open_from_env().unwrap();
 
@@ -76,7 +76,7 @@ fn main() {
         &mut input_handle,
         &mut output_handle,
         &mut repo,
-        &remote_type,
+        &nip_remote,
         &args.arg_remote,
         &mut ipfs,
         &mut idx,
@@ -104,7 +104,7 @@ fn handle_capabilities(input_handle: &mut BufRead, output_handle: &mut Write) ->
 fn handle_list(
     input_handle: &mut BufRead,
     output_handle: &mut Write,
-    remote_type: &NIPRemote,
+    nip_remote: &NIPRemote,
     idx: &NIPIndex,
 ) -> Result<(), Error> {
     let mut line_buf = String::new();
@@ -128,17 +128,11 @@ fn handle_list(
     }
 
     // Output appropriate response by remote type
-    match remote_type {
-        // How to proceed with each variant?
-        //
-        // Pull/Clone: Empty response
-        // Push: Upload all refs and index them, return index hash to user
+    match nip_remote {
         NIPRemote::NewIPFS | NIPRemote::NewIPNS => {
-            debug!("remote_type is new-*, \"list\" response empty");
+            debug!("remote is new-*, \"list\" response empty");
             output_handle.write_all(b"\n")?;
         }
-        // Pull/Clone: Download whatever git wants basing off the index under `hash`
-        // Push: Update the ref index and put it on IPFS, return the new hash
         existing => {
             debug!(
                 "Listing refs from existing repo at {}",
@@ -161,11 +155,13 @@ fn handle_fetches_and_pushes(
     input_handle: &mut BufRead,
     output_handle: &mut Write,
     repo: &mut Repository,
-    remote_type: &NIPRemote,
+    nip_remote: &NIPRemote,
     remote_name: &str,
     ipfs: &mut IpfsClient,
     idx: &mut NIPIndex,
 ) -> Result<(), Error> {
+    let mut current_idx = idx.clone();
+
     for line in input_handle.lines() {
         let line_buf = line?;
         match line_buf.as_str() {
@@ -192,7 +188,7 @@ fn handle_fetches_and_pushes(
                 })?;
                 debug!("Parsed ref name: {}", target_ref_name);
 
-                idx.fetch_to_ref_from_str(hash_to_fetch, target_ref_name, repo, ipfs)?;
+                current_idx.fetch_to_ref_from_str(hash_to_fetch, target_ref_name, repo, ipfs)?;
             }
             // push <refspec>
             push_line if push_line.starts_with("push") => {
@@ -226,8 +222,8 @@ fn handle_fetches_and_pushes(
                 debug!("Parsed dst: {}", dst);
 
                 // Upload the object tree
-                idx.push_ref_from_str(src, dst, repo, ipfs)?;
-                debug!("Index after push: {:#?}", idx);
+                current_idx.push_ref_from_str(src, dst, repo, ipfs)?;
+                debug!("Index after push: {:#?}", current_idx);
 
                 // Tell git we're done with this ref
                 writeln!(output_handle, "ok {}", dst)?;
@@ -248,53 +244,69 @@ fn handle_fetches_and_pushes(
         }
     }
 
-    // Upload the index itself
-    let new_remote_type = idx.ipfs_add(ipfs, Some(remote_type))?;
-
-    let new_repo_url = match &new_remote_type {
-        NIPRemote::NewIPFS | NIPRemote::NewIPNS => {
-            bail!("INTERNAL ERROR: we have just uploaded the index, there's no way for it to be new at this point");
+    // Upload current_idx to IPFS if it differs from the original idx
+    match current_idx {
+        ref unchanged_idx if unchanged_idx == idx => {
+            info!(
+                "Current URL not changed: {}",
+                repo.find_remote(remote_name)?
+                    .url()
+                    .ok_or_else(|| {
+                        let msg = format!("Could not get URL for remote {}", remote_name);
+                        error!("{}", msg);
+                        format_err!("{}", msg)
+                    })?
+                    .to_owned()
+            );
         }
-        _existing => {
-            trace!("Forming new URL for remote {}", remote_name);
-            let full_url = repo
-                .find_remote(remote_name)?
-                .url()
-                .ok_or_else(|| {
-                    let msg = format!("Could not get URL for remote {}", remote_name);
-                    error!("{}", msg);
-                    format_err!("{}", msg)
-                })?
-                .to_owned();
+        mut changed_idx => {
+            // Upload the changed index
+            let new_nip_remote = changed_idx.ipfs_add(ipfs, Some(nip_remote))?;
 
-            trace!("Existing full URL is {}", full_url);
+            match &new_nip_remote {
+                NIPRemote::NewIPFS | NIPRemote::NewIPNS => {
+                    bail!("INTERNAL ERROR: we have just uploaded the index, there's no way for it to be new at this point");
+                }
+                existing => {
+                    trace!("Forming new URL for remote {}", remote_name);
+                    let current_remote_url = repo
+                        .find_remote(remote_name)?
+                        .url()
+                        .ok_or_else(|| {
+                            let msg = format!("Could not get URL for remote {}", remote_name);
+                            error!("{}", msg);
+                            format_err!("{}", msg)
+                        })?
+                        .to_owned();
 
-            match full_url {
-                ref _nipdev if _nipdev.starts_with("nipdev") => {
-                    info!("nipdev detected!");
-                    format!("nipdev::{}", new_remote_type.to_string())
+                    trace!("Previous full URL is {}", current_remote_url);
+
+                    let new_repo_url = match current_remote_url {
+                        ref _nipdev if _nipdev.starts_with("nipdev") => {
+                            info!("nipdev detected!");
+                            format!("nipdev::{}", existing.get_hash().unwrap())
+                        }
+                        ref _nip if _nip.starts_with("nip") => {
+                            format!("nip::{}", existing.get_hash().unwrap())
+                        }
+                        other => {
+                            let msg = format!(
+                                "Remote {}: URL {} has an unknown prefix",
+                                remote_name, other
+                            );
+                            error!("{}", msg);
+                            bail!("{}", msg);
+                        }
+                    };
+                    debug!("Previous IPFS hash: {}", existing.get_hash().unwrap());
+                    debug!("New IPFS hash:      {}", existing.get_hash().unwrap());
+                    info!("Current URL: {}", new_repo_url);
+
+                    repo.remote_set_url(remote_name, &new_repo_url)?;
                 }
-                ref _nip if _nip.starts_with("nip") => {
-                    format!("nip::{}", new_remote_type.to_string())
-                }
-                other => {
-                    let msg = format!(
-                        "Remote {}: URL {} has an unknown prefix",
-                        remote_name, other
-                    );
-                    error!("{}", msg);
-                    bail!("{}", msg);
-                }
-            }
+            };
         }
-    };
-
-    debug!("Previous IPFS hash: {}", remote_type.to_string());
-    debug!("New IPFS hash:      {}", new_remote_type.to_string());
-    info!("Current URL: {}", new_repo_url);
-
-    repo.remote_set_url(remote_name, &new_repo_url)?;
-
+    }
     // Tell git that we're done
     writeln!(output_handle)?;
 
