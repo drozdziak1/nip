@@ -134,4 +134,8 @@ issue](https://github.com/drozdziak1/nip/issues/7) for progress on the solution.
 * Object size - nip doesn't know yet how to stream objects into/out of the
   local repository and will attempt to load them into RAM, this increases the
   memory footprint substantially for repos that posess large objects. Tracked
-  [here](https://github.com/drozdziak1/nip/issues/8)
+  [here](https://github.com/drozdziak1/nip/issues/8).
+* Descriptor limits - Because of improper `tokio` use, currently nip may exceed
+  descriptor limits because of redundant `tokio` runtime instances. Tracked
+  [here](https://github.com/drozdziak1/nip_core/issues/4). Easily solved by
+  issuing `ulimit -n unlimited` just before using git with a nip repo.
