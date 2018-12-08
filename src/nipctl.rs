@@ -5,6 +5,7 @@ extern crate clap;
 extern crate failure;
 extern crate git2;
 extern crate ipfs_api;
+extern crate serde_json;
 extern crate tokio_core;
 
 extern crate nip_core;
@@ -39,7 +40,13 @@ pub fn main() {
                         .long("--rollback")
                         .value_name("N")
                         .help("When listing an index move at most N steps back using the previous IPFS hash index field; Ignored for objects"),
-                ),
+                )
+                .arg(
+                    Arg::with_name("json")
+                        .short("j")
+                        .long("--json")
+                        .help("List the structure in JSON")
+                )
         )
         .get_matches();
 
@@ -106,7 +113,11 @@ pub fn main() {
                         warn!("Only {} rollbacks were made ({} requested, current index chain ends at {})", i, rollback_count, current_remote.to_string());
                     }
                     info!("nip index at {}:", current_remote.to_string());
-                    println!("{:#?}", idx);
+                    if matches.is_present("json") {
+                        println!("{}", serde_json::to_string_pretty(&idx).unwrap())
+                    } else {
+                        println!("{:#?}", idx);
+                    }
                 }
                 Err(e) => {
                     debug!(
@@ -118,7 +129,11 @@ pub fn main() {
                     match NIPObject::ipfs_get(&nip_remote.to_string(), &mut ipfs) {
                         Ok(obj) => {
                             info!("nip object at {}:", nip_remote.to_string());
-                            println!("{:#?}", obj);
+                            if matches.is_present("json") {
+                                println!("{}", serde_json::to_string_pretty(&obj).unwrap())
+                            } else {
+                                println!("{:#?}", obj);
+                            }
                         }
                         Err(e) => {
                             error!(
