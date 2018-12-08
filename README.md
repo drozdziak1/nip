@@ -129,8 +129,8 @@ issue](https://github.com/drozdziak1/nip/issues/7) for progress on the solution.
   are kept in your local IPFS node's data store. In practice this means that
   every local object pushed to a nip repo needs to be stored on your disk again
   in a form that IPFS understands. **However, nip guarantees object
-  deduplication for _all_ repos you use with it, which greatly reduces the
-  problem e.g. when you're working on different forks of the same project**
+  deduplication for _all_ repos you use with it, which means a given git object
+  is stored on IPFS only once, no matter the repo it comes from.**
 * Object size - nip doesn't know yet how to stream objects into/out of the
   local repository and will attempt to load them into RAM, this increases the
   memory footprint substantially for repos that posess large objects. Tracked
