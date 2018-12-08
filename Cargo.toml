@@ -8,7 +8,6 @@ readme = "README.md"
 keywords = ["git", "ipfs", "libgit2", "decentralization"]
 categories = ["command-line-utilities"]
 license = "BSD-3-Clause"
-license-file = "LICENSE"
 
 [badges]
 travis-ci = { repository = "drozdziak1/nip" }
@@ -32,7 +31,7 @@ git2 = "0.7.5"
 hyper = "0.12"
 ipfs-api = "0.5.0-alpha"
 log = "0.4"
-nip_core = {git = "https://github.com/drozdziak1/nip_core.git"}
+nip_core = "0.1.0"
 serde = "1.0"
 serde_derive = "1.0"
 tokio-core = "0.1"
