@@ -9,7 +9,7 @@ extern crate docopt;
 extern crate git2;
 extern crate ipfs_api;
 extern crate serde;
-extern crate tokio_core;
+extern crate tokio;
 
 extern crate nip_core;
 
@@ -18,6 +18,7 @@ use failure::Error;
 use git2::Repository;
 use ipfs_api::IpfsClient;
 use log::LevelFilter;
+use tokio::runtime::Runtime;
 
 use std::{
     env, io,
@@ -60,7 +61,22 @@ fn main() {
 
     let nip_remote: NIPRemote = args.arg_mode_or_hash.parse().unwrap();
 
-    let mut ipfs = IpfsClient::default();
+    let mut ipfs = IpfsClient::new("localhost", 5001).unwrap_or_else(|e| {
+        error!("Could not reach local IPFS instance: {}", e);
+        process::exit(1);
+    });
+
+    // Test connectivity to IPFS
+    let mut event_loop = Runtime::new().unwrap();
+
+    let stats = event_loop.block_on(ipfs.stats_repo()).map_err(|e| {
+        error!("Could not connect to IPFS, are you sure `ipfs daemon` is running?");
+        debug!("Raw error: {}", e);
+        process::exit(1);
+    }).unwrap();
+
+    debug!("IPFS connectivity OK. Datastore stats:\n{:#?}", stats);
+
     let mut idx = NIPIndex::from_nip_remote(&nip_remote, &mut ipfs).unwrap();
     trace!("Using index {:#?}", idx);
 
