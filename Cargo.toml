@@ -8,6 +8,7 @@ readme = "README.md"
 keywords = ["git", "ipfs", "libgit2", "decentralization"]
 categories = ["command-line-utilities"]
 license = "BSD-3-Clause"
+edition = "2018"
 
 [badges]
 travis-ci = { repository = "drozdziak1/nip" }
