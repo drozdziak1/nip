@@ -16,34 +16,11 @@ instance is running on its standard port.
 ```shell
 $ git remote add nip nip::new-ipfs # Use a magic placeholder URL representing a new IPFS repo
 $ git push --all nip # Push all refs to a brand new repo
- INFO 2018-12-01T15:13:00Z: git_remote_nip: nip Remote nip moves onto a new
-hash:
-Previous: new-ipfs
-New: /ipfs/QmYn3tWpBKaTMgHY8F1cqDXwkHd5TGMqFpvX9ALqhD7Hew
-Full new repo address:
-nip::/ipfs/QmYn3tWpBKaTMgHY8F1cqDXwkHd5TGMqFpvX9ALqhD7Hew
-To nip::/ipfs/QmZq47khma5nP7DjHUPoERhKnfNUPqkr5pVwmS8A6TQSeN
-1112e8f..aa89007  master -> master
 ```
 
 ## Cloning a repo from nip
 ```shell
 $ git clone nip::/ipfs/QmZq47khma5nP7DjHUPoERhKnfNUPqkr5pVwmS8A6TQSeN some_repo
-Cloning into 'some_repo'...
-$ ls some_repo
-some_file.txt  some_other_file.txt
-$ git log
-commit 1112e8f58a9cfbe3a2cfba83ef302357dea266e7 (HEAD -> master, tag: some-new-tag, origin/master)
-Author: Stan Drozd <not-showing-my-email@because-spambots.com>
-Date:   Tue Nov 27 20:55:40 2018 +0100
-
-   Committing some_other_file.txt
-
-commit 99e9fc231cca0c2f8f70d3c5bac0170a2dfedabe
-Author: Stan Drozd <not-showing-my-email@because-spambots.com>
-Date:   Tue Nov 27 20:55:40 2018 +0100
-
-   Committing some_file.txt
 ```
 
 ## Repo administration with nipctl (WIP)
