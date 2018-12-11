@@ -155,7 +155,7 @@ fn handle_list(
                 existing.to_string()
             );
             for (name, git_hash) in &idx.refs {
-                let mut output = format!("{} {}", git_hash, name);
+                let output = format!("{} {}", git_hash, name);
                 debug!("{}", output);
                 writeln!(output_handle, "{}", output)?;
             }
