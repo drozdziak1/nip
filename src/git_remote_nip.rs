@@ -5,14 +5,7 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
-extern crate docopt;
-extern crate git2;
-extern crate ipfs_api;
-extern crate serde;
-extern crate tokio;
-
-extern crate nip_core;
-
+use colored::*;
 use docopt::Docopt;
 use failure::Error;
 use git2::Repository;
@@ -21,8 +14,8 @@ use log::LevelFilter;
 use tokio::runtime::Runtime;
 
 use std::{
-    env, io,
-    io::{BufRead, BufReader, Write},
+    env,
+    io::{self, BufRead, BufReader, Write},
     process,
 };
 
@@ -69,11 +62,14 @@ fn main() {
     // Test connectivity to IPFS
     let mut event_loop = Runtime::new().unwrap();
 
-    let stats = event_loop.block_on(ipfs.stats_repo()).map_err(|e| {
-        error!("Could not connect to IPFS, are you sure `ipfs daemon` is running?");
-        debug!("Raw error: {}", e);
-        process::exit(1);
-    }).unwrap();
+    let stats = event_loop
+        .block_on(ipfs.stats_repo())
+        .map_err(|e| {
+            error!("Could not connect to IPFS, are you sure `ipfs daemon` is running?");
+            debug!("Raw error: {}", e);
+            process::exit(1);
+        })
+        .unwrap();
 
     debug!("IPFS connectivity OK. Datastore stats:\n{:#?}", stats);
 
@@ -322,7 +318,7 @@ fn handle_fetches_and_pushes(
                     };
                     debug!("Previous IPFS hash: {}", existing.get_hash().unwrap());
                     debug!("New IPFS hash:      {}", existing.get_hash().unwrap());
-                    info!("Current URL: {}", new_repo_url);
+                    info!("{} {}", "URL changed:".yellow(), new_repo_url.green());
 
                     repo.remote_set_url(remote_name, &new_repo_url)?;
                 }
