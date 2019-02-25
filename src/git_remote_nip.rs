@@ -11,7 +11,7 @@ use failure::Error;
 use git2::Repository;
 use ipfs_api::IpfsClient;
 use log::LevelFilter;
-use tokio::runtime::Runtime;
+use tokio::runtime::current_thread;
 
 use std::{
     env,
@@ -19,7 +19,7 @@ use std::{
     process,
 };
 
-use nip_core::{NIPIndex, NIPRemote};
+use nip_core::{ipfs_cat, migrate_index, parse_nip_header, NIPIndex, NIPRemote, NIP_HEADER_LEN};
 
 static USAGE: &'static str = "
 nip - the IPFS git remote helper that puts your repo objects Nowhere In Particular.
@@ -59,11 +59,7 @@ fn main() {
         process::exit(1);
     });
 
-    // Test connectivity to IPFS
-    let mut event_loop = Runtime::new().unwrap();
-
-    let stats = event_loop
-        .block_on(ipfs.stats_repo())
+    let stats = current_thread::block_on_all(ipfs.stats_repo())
         .map_err(|e| {
             error!("Could not connect to IPFS, are you sure `ipfs daemon` is running?");
             debug!("Raw error: {}", e);
@@ -73,7 +69,26 @@ fn main() {
 
     debug!("IPFS connectivity OK. Datastore stats:\n{:#?}", stats);
 
-    let mut idx = NIPIndex::from_nip_remote(&nip_remote, &mut ipfs).unwrap();
+    let mut idx = if let Some(ipfs_hash) = nip_remote.get_hash() {
+        let idx_bytes = ipfs_cat(&ipfs_hash, &mut ipfs).unwrap_or_else(|e| {
+            error!("Could not fetch index: {}", e);
+            process::exit(1);
+        });
+
+        let version = parse_nip_header(idx_bytes.as_slice()).unwrap();
+
+        match migrate_index(&idx_bytes[NIP_HEADER_LEN..], version, &mut ipfs) {
+            Ok(idx) => idx,
+            Err(e) => {
+                error!("Could not parse index: {}", e.to_string());
+                process::exit(1);
+            }
+        }
+    } else {
+        debug!("Creating a fresh index");
+        NIPIndex::from_nip_remote(&nip_remote, &mut ipfs).unwrap()
+    };
+
     trace!("Using index {:#?}", idx);
 
     let mut input_handle = BufReader::new(io::stdin());
