@@ -24,93 +24,38 @@ $ git clone nip::/ipfs/QmZq47khma5nP7DjHUPoERhKnfNUPqkr5pVwmS8A6TQSeN some_repo
 ```
 
 ## Repo administration with nipctl (WIP)
-nip comes with `nipctl` - a utility for nip repo administration. It's nowhere
-near ready yet, but you can view the list of planned features
-[here](https://github.com/drozdziak1/nip/issues/6). Suggestions for additional
-features are very welcome.
+nip comes with `nipctl` - a utility for nip repo administration. As for today
+Its functionality is very minimal (printing of objects and indices), but some of
+the planned features include:
+* Garbage collection - for removing all objects not
+associated with any `refs` items
+* Managing git push notification settings - Depends on
+https://github.com/drozdziak1/nip/issues/7
 
-# How it all works a.k.a. FAQ
-## How does git talk to nip?
-nip implements what is called a *git remote helper* - a new remote transport
-backend that can be used by git for pushes and fetches of remote git
-repositories. In fact not so long ago the HTTP transport in git used to
-be a separate binary taking advantage of this API. You can read more about the
-exact remote helper operation in
-[`gitremote-helpers(1)`](https://git-scm.com/docs/git-remote-helpers).
-
-Under the hood, the stuff above means that upon a `git push` to or `git fetch` from
-a nip remote, git will run the `git-remote-nip` binary and exchange information
-about local/remote states via stdio. Then the binary is expected to carry out a
-state sync as per the specification of the push/fetch.
-
-## How does nip interact with git repos and IPFS?
-### Local repo
-Locally, nip takes advantage of
-[`git2-rs`](https://github.com/alexcrichton/git2-rs) which is a set of Rust
-bindings to [`libgit2`](https://libgit2.org). `libgit2` is then used to scoop
-out or instantiate git objects - depending on whether a `push` or `fetch`
-operation is requested by git.
-
-### IPFS storage
-For IPFS storage nip uses a fairly thin CBOR-encoded format comprised of two
-datatypes: `NIPIndex` and `NIPObject`. `NIPIndex` is what every top-level nip
-repo IPFS link points to and effectively the face of every nip remote - it
-stores information about all git objects available in a given remote as well as
-where branch tips and tags should resolve to. `NIPObject` on the other hand
-captures the actual git object tree topology of the repo.
-
-Every `NIPObject` is comprised of two parts:
-- An IPFS link to the raw bytes of the underlying  git object - this data isn't
-  inlined within the data structure to maximize data deduplication, including
-  objects produced by different nip versions or even different IPFS git backends
-  that choose to operate in the same manner.
-- git object-specific metadata - this is done via a helper enum type where the
-  variants contain differently arranged git hashes depending on object type:
-    - commits - parent hash(es), tree hash
-    - trees - children hashes (pointing to another nested tree or a blob)
-    - blobs - this variant is purely symbolic, the raw bytes link is sufficient
-      since blobs are always leaf nodes in git
-    - tag objects - target object hash of the tag; only used for
-      annotated/signed tags
-
-### A note on object tree edges in nip
-An important fact about `NIPObject` metadata is that the references to other
-`NIPObject`s are git hashes and not IPFS ones - it is done that way so that the
-Rust code can check if the local git repo already contains a given git object
-without making any additional requests to the local IPFS node (it looks them up
-in the `NIPIndex` which is always downloaded first). Also, this practice makes
-the format less forgiving and therefore less prone to being incorrectly used.
-
-## How does nip intend to stay backwards-compatible?
-Internally, nip prepends every serialized `NIPIndex` and `NIPObject` with a very
-simple 8-byte header. It starts with a `b"NIPNIP"` magic followed by a
-big-endian 16-bit number denoting the version of the data format a given object
-uses. This ensures that even when the serialization format is changed or even if
-`serde` is no longer used, `nip` will still be able to find out in time.
+# How does it all work?
+See `FAQ.md` for a tour of underlying nip functionality.
 
 # Development
 If you'd like to hack on nip, the `dev_bootstrap.sh` script is where you should
-start.  It symlinks `nipctl` and `git-remote-nip` as `nipdevctl` and
+start. It symlinks `nipctl` and `git-remote-nip` as `nipdevctl` and
 `git-remote-nipdev` in `~/.cargo/bin`, respectively. As a result, `git` will
 pick `git-remote-nipdev` for every remote that has a `nipdev::<hash_or_mode>`
-address.
+address instead of `git-remote-nip`, which enables painless testing during
+developing.
 
 # Limitations
+* Running times - nip will only work as fast as IPFS lets it.
 * Repo pinning and git push notifications - people interested in keeping track
-of remote repo's progress have no way of knowing about pushes made to it. See [this
-issue](https://github.com/drozdziak1/nip/issues/7) for progress on the solution.
-* Submodules - nip doesn't understand how to push/pull submodule pins yet.
+of remote repo's progress have no way of knowing about pushes made to it. See
+[this issue](https://github.com/drozdziak1/nip/issues/7) for progress on the
+solution.
 * Disk space - by design local git objects need to have IPFS counterparts which
-  are kept in your local IPFS node's data store. In practice this means that
-  every local object pushed to a nip repo needs to be stored on your disk again
-  in a form that IPFS understands. **However, nip guarantees object
-  deduplication for _all_ repos you use with it, which means a given git object
-  is stored on IPFS only once, no matter the repo it comes from.**
+are kept in your local IPFS node's data store. In practice this means that
+every local object pushed to a nip repo needs to be stored on your disk again
+in a form that IPFS understands. **However, nip guarantees object
+deduplication for _all_ repos you use with it, which means a given git object
+is stored on IPFS only once, no matter the repo it comes from.**
 * Object size - nip doesn't know yet how to stream objects into/out of the
-  local repository and will attempt to load them into RAM, this increases the
-  memory footprint substantially for repos that posess large objects. Tracked
-  [here](https://github.com/drozdziak1/nip/issues/8).
-* Descriptor limits - Because of improper `tokio` use, currently nip may exceed
-  descriptor limits because of redundant `tokio` runtime instances. Tracked
-  [here](https://github.com/drozdziak1/nip_core/issues/4). Easily solved by
-  issuing `ulimit -n unlimited` just before using git with a nip repo.
+local repository and will attempt to load them into RAM, this increases the
+memory footprint substantially for repos that posess large objects. Tracked
+[here](https://github.com/drozdziak1/nip/issues/8).

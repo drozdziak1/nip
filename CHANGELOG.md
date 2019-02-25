@@ -1,3 +1,13 @@
+# v0.3.0
+What's new:
+* Format migrations - applied implicitly in both `git-remote-nip` and `nipctl`
+* nip URLs are now colored when different
+
+Breaking changes:
+* NIP protocol version 2:
+  - Objects contain their git hashes
+  - Submodules are denoted with a "submodule-tip" string in `objs`
+
 # v0.2.0
 What's new:
 * Big repos don't exceed descriptor limits anymore
